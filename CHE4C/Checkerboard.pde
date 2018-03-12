@@ -106,7 +106,7 @@ class Checkerboard implements Comparable<Checkerboard> {
     float scalar = 1.0f;
     switch (figure.type) {
      case PAWN:
-       scalar = (figure.chessColor == ChessFigureColor.WHITE ? 8 - figure.getPositionY() : figure.getPositionY()) / 2.0f;
+       scalar = (figure.chessColor == ChessFigureColor.WHITE ? 7 - figure.getPositionY() : figure.getPositionY()) / 2.0f;
        scalar *= map(this.figures.size(), 0, 32, 0.6, 0.01);
        scalar++;
        break;
