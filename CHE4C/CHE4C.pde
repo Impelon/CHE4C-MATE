@@ -16,27 +16,35 @@ float scaleFactor = 3.0;
 // Feldgröße in Pixel für die Anzeige
 int pxFieldSize = (int) (fieldSize * scaleFactor);
 
+// Zuordnung die Bilder für Bildschirmelemente enthält
+HashMap<String, PImage> iconImages = new HashMap<String, PImage>();
 // Zuordnung von ID's der Bildschirmelemente zu ihren Gitter-Koordinaten
 HashMap<String, Entry<Byte, Byte>> elementGrid = new HashMap<String, Entry<Byte, Byte>>();
 // ID's der Bildschrimelemente
 final String TURN_DISPLAY = "turn";
 final String WINNER_DISPLAY = "winner";
+final String VIEW_SELECTOR = "view";
 final String AI_SELECTOR = "ai";
 final String GAME_MODE_SELECTOR = "gameMode";
 final String BASE_DEPTH_SELECTOR = "baseDepth";
-final String SAVE_FRAMES_SELECTOR = "saveFrames";
 final String SERIAL_SELECTOR = "serial";
 final String CAPTURE_SELECTOR = "capture";
-final String VIEW_SELECTOR = "view";
+final String SAVE_FRAMES_SELECTOR = "saveFrames";
+final String HISTORY_UNDO_BUTTON = "historyUndo";
+final String HISTORY_PICK_BUTTON = "historyPick";
+final String HISTORY_REDO_BUTTON = "historyRedo";
 final String PAUSE_BUTTON = "pause";
 final String RESET_BUTTON = "reset";
+
+// Wahrheitswert, welcher bestimmt ob die Zugausführung pausiert ist
+boolean paused = true;
+// Identifikation des Ansichtsmodus
+byte view = 0;
 
 // Zuordnung die alle Bilder der Figuren enthält
 HashMap<String, PImage> figureImages = new HashMap<String, PImage>();
 // Wahrheitswert, welcher bestimmt ob jeder Spielzug als Screenshot gespeichert wird
 boolean saveFrames = false;
-// Wahrheitswert, welcher bestimmt ob die Zugausführung pausiert ist
-boolean paused = true;
 // Name des Ordners im "frames", wo die Screenshots gespeichert werden sollen
 String frameFolder;
 
@@ -46,14 +54,20 @@ SChFiMTransceiver movementTransceiver;
 SUIfMTransceiver interactionTransceiver;
 // serielle Schnittstelle
 Serial serial;
+// Index der Verbindung
+int serialIndex = 0;
 
 // Objekt für die Bilderkennung
-FigureDetector detector;
-// Objekte für die Bildaufnahme
+FigureDetector detector = new FigureDetector();
+// Objekt für die Bildaufnahme
 Capture capture;
+// Index der Webcam
+int captureIndex = 0;
 
 // Liste, die alle getätigten Züge enthält
 ArrayList<Entry<Checkerboard, ChessMovement>> executedMovements;
+// Verschiebung des Indexes welcher auf der Benutzeroberfläche gezeigt wird
+int displayIndexOffset;
 // Enthält die Positionen der Auswahl durch die Benutzeroberfläche
 Entry<PVector, PVector> selection = null;
 // Enthält den Figurentyp der Auswahl durch die Benutzeroberfläche (wird bei der Umwandlung von Bauern benutzt)
@@ -98,7 +112,7 @@ void setup() {
   detector.calibrate(capture);
   
   try {
-    serial = new Serial(this, Serial.list()[0], 9600);
+    serial = new Serial(this, Serial.list()[serialIndex], 9600);
   } catch (Exception ex) {
     serial = null;
   }
@@ -110,6 +124,7 @@ void setup() {
   textFont(createFont("Gothic", 20));
   
   loadFigureImages();
+  loadIconImages();
     
   try {
     board = checkerboardClass.getConstructor(CHE4C.class, boolean.class).newInstance(this, true);
@@ -120,7 +135,9 @@ void setup() {
   
   frameFolder = "f_" + String.valueOf(day()) + "-" + String.valueOf(month()) + "-" + String.valueOf(year()) + "_" + String.valueOf(hour()) + "-" + String.valueOf(minute()) + "-" + String.valueOf(second()) + "_" + hex(int(random(100000)), 4);
   executedMovements = new ArrayList<Entry<Checkerboard, ChessMovement>>();
+  executedMovements.add(new AbstractMap.SimpleEntry<Checkerboard, ChessMovement>(board, null));
   round = 0;
+  displayIndexOffset = 0;
 }
 
 /**
@@ -131,20 +148,31 @@ void draw() {
   clear();
   textAlign(CENTER);
   
-  if (keyPressed && key == CODED && keyCode == SHIFT) {
-    detector.drawFOV();
-  } else {
-    drawCheckerboard(board, fromGridX((byte) 1), fromGridY((byte) 0));
-    drawSelection(fromGridX((byte) 1), fromGridY((byte) 0));
-    
-    drawTurnDisplay(0, 0);
-    drawWinnerDisplay(0, 1);
-    drawAISelector(0, 5);
-    drawGameModeSelector(0, 6);
-    drawBaseDepthSelector(0, 7);
-    drawPauseButton(9, 6);
-    drawResetButton(9, 7);
+  switch (view) {
+    case 0:
+      drawCheckerboard(executedMovements.get(executedMovements.size() - 1 - displayIndexOffset).getKey(), fromGridX((byte) 1), fromGridY((byte) 0));
+      drawSelection(fromGridX((byte) 1), fromGridY((byte) 0));
+      break;
+    case 1:
+      detector.drawFOV(fromGridX((byte) 1), fromGridY((byte) 1), pxFieldSize * 8, pxFieldSize * 6);
+      break;
   }
+  
+  drawTurnDisplay(0, 0);
+  drawWinnerDisplay(0, 1);
+  drawViewSelector(0, 4);
+  drawAISelector(0, 5);
+  drawGameModeSelector(0, 6);
+  drawBaseDepthSelector(0, 7);
+  drawSerialSelector(9, 0);
+  drawCaptureSelector(9, 1);
+  drawSaveFramesSelector(9, 2);
+  drawHistoryUndoButton(9, 3);
+  drawHistoryPickButton(9, 4);
+  drawHistoryRedoButton(9, 5);
+  drawPauseButton(9, 6);
+  drawResetButton(9, 7);
+  
   if (!paused && (frameCount % 50 == 0)) {
     if (saveFrames)
       saveFrame("frames/" + frameFolder + "/" + str(round) + ".png");
@@ -340,6 +368,16 @@ public void loadFigureImages() {
 }
 
 /**
+ * Läd die Bilddateien der Bildschirmelemente aus dem data-Ordner.
+ */
+public void loadIconImages() {
+  iconImages.put(VIEW_SELECTOR, loadImage("VIEW_SELECTOR.png"));
+  iconImages.put(SERIAL_SELECTOR, loadImage("SERIAL_SELECTOR.png"));
+  iconImages.put(CAPTURE_SELECTOR, loadImage("CAPTURE_SELECTOR.png"));
+  iconImages.put(SAVE_FRAMES_SELECTOR, loadImage("SAVE_FRAMES_SELECTOR.png"));
+}
+
+/**
  * Zeichnet das angegebene Spielbrett an der angegebenen Position.
  * 
  * @param board das Spielbrett
@@ -399,7 +437,7 @@ public void drawTurnDisplay(int x, int y) {
   y = fromGridY((byte) y);
   
   fill(#FFFFFF);
-  text("Turn: " + str(round), x, y, x + pxFieldSize, y + pxFieldSize);
+  text("Turn: " + str(round), x, y, pxFieldSize, pxFieldSize);
   
   ChessFigure tempFigure = new ChessFigure(ChessFigureType.KING, round % 2 == 0 ? ChessFigureColor.WHITE : ChessFigureColor.BLACK, (byte) 0, (byte) 0);
   fill(0x99999999);
@@ -422,7 +460,7 @@ public void drawWinnerDisplay(int x, int y) {
   y = fromGridY((byte) y);
   
   fill(#FFFFFF);
-  text("Winner:", x, y, x + pxFieldSize, y + pxFieldSize);
+  text("Winner:", x, y, pxFieldSize, pxFieldSize);
   
   ChessFigure tempFigure;
   if (board.hasWon(ChessFigureColor.WHITE))
@@ -439,6 +477,29 @@ public void drawWinnerDisplay(int x, int y) {
 }
 
 /**
+ * Zeichnet ein Element zur Auswahl der Ansischt.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Elements
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Elements
+ */
+public void drawViewSelector(int x, int y) {
+  elementGrid.put(VIEW_SELECTOR, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(#FFFFFF);
+  text("View:", x, y, pxFieldSize, pxFieldSize);
+  
+  fill(0x99999999);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
+  
+  image(iconImages.get(VIEW_SELECTOR), x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
+}
+
+/**
  * Zeichnet ein Element zur Auswahl der Spielerfarben, welche durch die KI gesteuert werden.
  * Die Größe entspricht der pixel-Feldgröße.
  * 
@@ -451,7 +512,7 @@ public void drawAISelector(int x, int y) {
   y = fromGridY((byte) y);
   
   fill(#FFFFFF);
-  text("AI:", x, y, x + pxFieldSize, y + pxFieldSize);
+  text("AI:", x, y, pxFieldSize, pxFieldSize);
   
   fill(0x99999999);
   stroke(#BBBBBB);
@@ -494,12 +555,12 @@ public void drawGameModeSelector(int x, int y) {
   y = fromGridY((byte) y);
   
   fill(#FFFFFF);
-  text("Game Mode: ", x, y, x + pxFieldSize, y + pxFieldSize);
+  text("Game Mode:", x, y, pxFieldSize, pxFieldSize);
   
   fill(#FFFFFF);
   pushStyle();
   textSize(16);
-  text(checkerboardClass.getSimpleName(), x, y + pxFieldSize / 4, x + pxFieldSize, y + 3 * pxFieldSize / 4);
+  text(checkerboardClass.getSimpleName(), x, y + pxFieldSize / 4, pxFieldSize, 3 * pxFieldSize / 4);
   popStyle();
 }
 
@@ -518,7 +579,7 @@ public void drawBaseDepthSelector(int x, int y) {
   fill(#FFFFFF);
   stroke(#BBBBBB);
   strokeWeight(5);
-  text("Base Depth: " + str(baseDepth), x, y, x + pxFieldSize, y + pxFieldSize);
+  text("Base Depth: " + str(baseDepth), x, y, pxFieldSize, pxFieldSize);
   
   fill(0x99999999);
   rect(x + pxFieldSize / 4, y + 3 * pxFieldSize / 5, pxFieldSize / 4, pxFieldSize / 4);
@@ -529,6 +590,188 @@ public void drawBaseDepthSelector(int x, int y) {
   rect(x + pxFieldSize / 2, y + 3 * pxFieldSize / 5, pxFieldSize / 4, pxFieldSize / 4);
   fill(#FFFFFF);
   text("+", x + pxFieldSize / 2, y + 3 * pxFieldSize / 5, pxFieldSize / 4, pxFieldSize / 4);
+}
+
+/**
+ * Zeichnet ein Element zur Auswahl der seriellen Schnittstelle.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Elements
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Elements
+ */
+public void drawSerialSelector(int x, int y) {
+  elementGrid.put(SERIAL_SELECTOR, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(#FFFFFF);
+  text("Serial: " + str(serialIndex), x, y, pxFieldSize, pxFieldSize);
+  
+  pushStyle();
+  textSize(16);
+  if (serial != null)
+    text(Serial.list()[serialIndex], x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
+  else
+    text("No Connection", x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
+  popStyle();
+  
+  fill(0x99999999);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + 3 * pxFieldSize / 5, pxFieldSize / 2, pxFieldSize / 4);
+  
+  image(iconImages.get(SERIAL_SELECTOR), x + pxFieldSize / 4, y + 3 * pxFieldSize / 5, pxFieldSize / 2, pxFieldSize / 4);
+}
+
+/**
+ * Zeichnet ein Element zur Auswahl der Webcam.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Elements
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Elements
+ */
+public void drawCaptureSelector(int x, int y) {
+  elementGrid.put(CAPTURE_SELECTOR, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(#FFFFFF);
+  text("Camera: " + str(captureIndex), x, y, pxFieldSize, pxFieldSize);
+  
+  pushStyle();
+  textSize(10);  
+  if (capture != null) {
+    String[] args = Capture.list()[captureIndex].split(",");
+    String display = "";
+    for (int n = 0; n < args.length; n++)
+      display += args[n].substring(args[n].indexOf('=') + 1) + (n == args.length ? "" : ", ");
+    text(display, x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
+  } else
+    text("No Source", x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
+  popStyle();
+  
+  fill(0x99999999);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + 3 * pxFieldSize / 5, pxFieldSize / 2, pxFieldSize / 4);
+  
+  image(iconImages.get(CAPTURE_SELECTOR), x + 3 * pxFieldSize / 8, y + 3 * pxFieldSize / 5, pxFieldSize / 4, pxFieldSize / 4);
+}
+
+/**
+ * Zeichnet ein Element zur Auswahl, ob Bilder vom Programm bei jedem Spielzug gespeichert werden sollen.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Elements
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Elements
+ */
+public void drawSaveFramesSelector(int x, int y) {
+  elementGrid.put(SAVE_FRAMES_SELECTOR, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(#FFFFFF);
+  text("Save Frames:", x, y, pxFieldSize, pxFieldSize);
+  
+  fill(0x99999999);
+  fill(saveFrames ? 0x9999FF99 : 0x99FF9999);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + 3 * pxFieldSize / 5, pxFieldSize / 2, pxFieldSize / 4);
+  
+  image(iconImages.get(SAVE_FRAMES_SELECTOR), x + 3 * pxFieldSize / 8, y + 3 * pxFieldSize / 5, pxFieldSize / 4, pxFieldSize / 4);
+}
+
+/**
+ * Zeichnet einen Schalter, der bei Betätigung die eine Ebene nach oben in den ausgeführten Bewegungen geht.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ */
+public void drawHistoryUndoButton(int x, int y) {
+  elementGrid.put(HISTORY_UNDO_BUTTON, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(0x999999FF);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
+  
+  fill(#FFFFFF);
+  noStroke();
+  
+  ellipseMode(CORNER);
+  noFill();
+  stroke(#FFFFFF);
+  arc(x + 4 * pxFieldSize / 9, y + 2 * pxFieldSize / 5, pxFieldSize / 5, pxFieldSize / 5, 3 * HALF_PI, 5 * HALF_PI);
+  line(x + 4 * pxFieldSize / 9, y + 2 * pxFieldSize / 5, x + 5 * pxFieldSize / 9, y + 2 * pxFieldSize / 5);
+  line(x + 2 * pxFieldSize / 5, y + 3 * pxFieldSize / 5, x + 5 * pxFieldSize / 9, y + 3 * pxFieldSize / 5);
+  
+  fill(#FFFFFF);
+  noStroke();
+  triangle(x + 4 * pxFieldSize / 9, y + 0.35 * pxFieldSize, x + 4 * pxFieldSize / 9, y + 0.45 * pxFieldSize, x + pxFieldSize / 3, y + 2 * pxFieldSize / 5);
+  
+  //triangle(x + pxFieldSize / 3, y + 2 * pxFieldSize / 3, x + 2 * pxFieldSize / 3, y + 2 * pxFieldSize / 3, x + pxFieldSize / 2, y + pxFieldSize / 3);
+}
+
+/**
+ * Zeichnet einen Schalter, der bei Betätigung die ausgewähtle Ebene als Spielfeld festlegt.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ */
+public void drawHistoryPickButton(int x, int y) {
+  elementGrid.put(HISTORY_PICK_BUTTON, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(0x99999999);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
+  
+  fill(#FFFFFF);
+  noStroke();
+  rect(x + pxFieldSize / 3, y + pxFieldSize / 3, pxFieldSize / 3, pxFieldSize / 3);
+  
+  fill(displayIndexOffset == 0 ? #00FF00 : #000000);
+  rect(x + 2 * pxFieldSize / 5, y + 2 * pxFieldSize / 5, pxFieldSize / 5, pxFieldSize / 5);
+  
+  fill(#FFFFFF);
+  rect(x + 0.45 * pxFieldSize, y + 0.45 * pxFieldSize, 0.1 * pxFieldSize, 0.1 * pxFieldSize);
+}
+
+/**
+ * Zeichnet einen Schalter, der bei Betätigung die eine Ebene nach unten in den ausgeführten Bewegungen geht.
+ * Die Größe entspricht der pixel-Feldgröße.
+ * 
+ * @param x x-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ * @param y y-Gitter-Koordinate der oberen, linken Ecke des Schalters
+ */
+public void drawHistoryRedoButton(int x, int y) {
+  elementGrid.put(HISTORY_REDO_BUTTON, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
+  x = fromGridX((byte) x);
+  y = fromGridY((byte) y);
+  
+  fill(0x999999FF);
+  stroke(#BBBBBB);
+  strokeWeight(5);
+  rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
+  
+  ellipseMode(CORNER);
+  noFill();
+  stroke(#FFFFFF);
+  arc(x + 4 * pxFieldSize / 11, y + 2 * pxFieldSize / 5, pxFieldSize / 5, pxFieldSize / 5, HALF_PI, 3 * HALF_PI);
+  line(x + 5 * pxFieldSize / 11, y + 2 * pxFieldSize / 5, x + 5 * pxFieldSize / 9, y + 2 * pxFieldSize / 5);
+  line(x + 5 * pxFieldSize / 11, y + 3 * pxFieldSize / 5, x + 7 * pxFieldSize / 12, y + 3 * pxFieldSize / 5);
+  
+  fill(#FFFFFF);
+  noStroke();
+  triangle(x + 5 * pxFieldSize / 9, y + 0.35 * pxFieldSize, x + 5 * pxFieldSize / 9, y + 0.45 * pxFieldSize, x + 2 * pxFieldSize / 3, y + 2 * pxFieldSize / 5);
+
+  //triangle(x + pxFieldSize / 3, y + pxFieldSize / 3, x + 2 * pxFieldSize / 3, y + pxFieldSize / 3, x + pxFieldSize / 2, y + 2 * pxFieldSize / 3);
 }
 
 /**
@@ -543,7 +786,7 @@ public void drawPauseButton(int x, int y) {
   x = fromGridX((byte) x);
   y = fromGridY((byte) y);
   
-  fill(paused ? 0xBB00FF00 : 0xBBFF5555);
+  fill(paused ? 0x9999FF99 : 0x99FF9999);
   stroke(#BBBBBB);
   strokeWeight(5);
   rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
@@ -579,7 +822,7 @@ public void drawResetButton(int x, int y) {
   noFill();
   stroke(#FFFFFF);
   strokeWeight(5);
-  arc(x + pxFieldSize / 3, y + pxFieldSize / 3, pxFieldSize / 3, pxFieldSize / 3, QUARTER_PI, TWO_PI);
+  arc(x + pxFieldSize / 3, y + pxFieldSize / 3, pxFieldSize / 3, pxFieldSize / 3, QUARTER_PI * 1.25, TWO_PI);
   
   fill(#FFFFFF);
   noStroke();
@@ -594,10 +837,20 @@ void mouseClicked() {
   byte gridX = toGridX(mouseX);
   byte gridY = toGridY(mouseY);
   
+  if (elementGrid.get(VIEW_SELECTOR) != null && elementGrid.get(VIEW_SELECTOR).getKey() == gridX && elementGrid.get(VIEW_SELECTOR).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
+        view = (byte) ((view + 1) % 2);
+      }
+  }
+  
   if (elementGrid.get(AI_SELECTOR) != null && elementGrid.get(AI_SELECTOR).getKey() == gridX && elementGrid.get(AI_SELECTOR).getValue() == gridY) {
     int x = mouseX - fromGridX(gridX);
     int y = mouseY - fromGridY(gridY);
-    if (y > pxFieldSize / 2)
+    if (y > pxFieldSize / 2 && y < 3 * pxFieldSize / 4)
       if (x > pxFieldSize / 2 && x < 3 * pxFieldSize / 4)
         isBlackAI = !isBlackAI;
       else if (x > pxFieldSize / 4 && x < pxFieldSize / 2)
@@ -625,7 +878,7 @@ void mouseClicked() {
   if (elementGrid.get(BASE_DEPTH_SELECTOR) != null && elementGrid.get(BASE_DEPTH_SELECTOR).getKey() == gridX && elementGrid.get(BASE_DEPTH_SELECTOR).getValue() == gridY) {
     int x = mouseX - fromGridX(gridX);
     int y = mouseY - fromGridY(gridY);
-    if (y > 3 * pxFieldSize / 5)
+    if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize)
       if (x > pxFieldSize / 2 && x < 3 * pxFieldSize / 4) {
         baseDepth++;
         if (baseDepth > depthLimit)
@@ -637,12 +890,88 @@ void mouseClicked() {
       }
   }
   
-  if (elementGrid.get(RESET_BUTTON) != null && elementGrid.get(RESET_BUTTON).getKey() == gridX && elementGrid.get(RESET_BUTTON).getValue() == gridY) {
-    setup();
+  if (elementGrid.get(SERIAL_SELECTOR) != null && elementGrid.get(SERIAL_SELECTOR).getKey() == gridX && elementGrid.get(SERIAL_SELECTOR).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
+        if (Serial.list().length > 0) {
+          serialIndex = (serialIndex + 1) % Serial.list().length;
+        }
+      }
   }
   
-  if (elementGrid.get(PAUSE_BUTTON) != null && elementGrid.get(PAUSE_BUTTON).getKey() == gridX && elementGrid.get(PAUSE_BUTTON).getValue() == gridY) {
-    paused = !paused;
+  if (elementGrid.get(CAPTURE_SELECTOR) != null && elementGrid.get(CAPTURE_SELECTOR).getKey() == gridX && elementGrid.get(CAPTURE_SELECTOR).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
+        if (Capture.list().length > 0) {
+          captureIndex = (captureIndex + 1) % Capture.list().length;
+        }
+      }
+  }
+  
+  if (elementGrid.get(SAVE_FRAMES_SELECTOR) != null && elementGrid.get(SAVE_FRAMES_SELECTOR).getKey() == gridX && elementGrid.get(SAVE_FRAMES_SELECTOR).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
+        saveFrames = !saveFrames;
+      }
+  }
+  
+  if (elementGrid.get(HISTORY_UNDO_BUTTON) != null && elementGrid.get(HISTORY_UNDO_BUTTON).getKey() == gridX && elementGrid.get(HISTORY_UNDO_BUTTON).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
+        displayIndexOffset = constrain(displayIndexOffset + 1, 0, executedMovements.size() - 1);
+        paused = true;
+      }
+  }
+  
+  if (elementGrid.get(HISTORY_PICK_BUTTON) != null && elementGrid.get(HISTORY_PICK_BUTTON).getKey() == gridX && elementGrid.get(HISTORY_PICK_BUTTON).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
+        board = executedMovements.get(executedMovements.size() - 1 - displayIndexOffset).getKey();
+        executedMovements.subList(executedMovements.size() - displayIndexOffset, executedMovements.size()).clear();
+        round -= displayIndexOffset;
+        displayIndexOffset = 0;
+      }
+  }
+  
+  if (elementGrid.get(HISTORY_REDO_BUTTON) != null && elementGrid.get(HISTORY_REDO_BUTTON).getKey() == gridX && elementGrid.get(HISTORY_REDO_BUTTON).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
+        displayIndexOffset = constrain(displayIndexOffset - 1, 0, executedMovements.size() - 1);
+      }
+  }
+  
+  if (elementGrid.get(RESET_BUTTON) != null && elementGrid.get(RESET_BUTTON).getKey() == gridX && elementGrid.get(RESET_BUTTON).getValue() == gridY) {
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4)
+        setup();
+  }
+  
+  if (elementGrid.get(PAUSE_BUTTON) != null && elementGrid.get(PAUSE_BUTTON).getKey() == gridX && elementGrid.get(PAUSE_BUTTON).getValue() == gridY) {    
+    int x = mouseX - fromGridX(gridX);
+    int y = mouseY - fromGridY(gridY);
+    
+    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
+      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4)
+        if (displayIndexOffset == 0)
+          paused = !paused;
   }
   
   if (mouseX >= fromGridX((byte) 1) && mouseX < fromGridX((byte) 9) && mouseY >= fromGridY((byte) 0) && mouseY < fromGridY((byte) 8)) {
@@ -687,7 +1016,8 @@ void mouseWheel() {
 void keyPressed() {
   if (mouseX >= fromGridX((byte) 1) && mouseX < fromGridX((byte) 9) && mouseY >= fromGridY((byte) 0) && mouseY < fromGridY((byte) 8)) {
     if (key == ENTER || key == RETURN)
-      confirmedSelection = true;
+      if (displayIndexOffset == 0 && view == 0)
+        confirmedSelection = true;
     if (key == DELETE) {
       selection = null;
       typeSelection = null;
