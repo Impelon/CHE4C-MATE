@@ -161,7 +161,8 @@ void resetMotors() {
     xStepper.step(-1);
   while(digitalRead(Y_RESET_SWITCH_PIN) == LOW)
     yStepper.step(-1);
-  
+
+  // 0, 0 nicht erreichbar, weil Schachbrett versetzt (falsch) eingezeichnet.
   currentX = 2;
   currentY = 2;
 

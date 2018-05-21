@@ -130,6 +130,12 @@ void interact() {
       else
         statusLED.writeColor(0x00000000);
       break;
+    case 6: // MISSING_FIGURE
+      if (millis() % 2000 < 1000)
+        statusLED.writeColor(0x00FF0000);
+      else
+        statusLED.writeColor(0x00FFFF00);
+      break;
     case 0: // IDLE
     default:
       break;

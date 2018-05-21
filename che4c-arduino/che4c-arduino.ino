@@ -13,7 +13,7 @@ void setup() {
   randomSeed(analogRead(0));
 
   // SChFiM initialisieren
-  setBaseSpeed(150);
+  setBaseSpeed(250);
   resetMotors();
   // SUIfM initialisieren
   reset();
@@ -42,3 +42,4 @@ void serialEvent() {
   SChFiM_interpretLines(input);
   SUIfM_interpretLines(input);
 }
+
