@@ -7,7 +7,8 @@ enum ControlStatus {
   MOVING(2),
   INVALID_BOARD(3),
   WAITING_FOR_PLAYER(4),
-  GAME_ENDED(5);
+  GAME_ENDED(5),
+  MISSING_FIGURE(6);
   
   protected int statusByte;
   

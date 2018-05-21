@@ -37,6 +37,8 @@ class AntichessCheckerboard extends Checkerboard {
   
   @Override
   public int getScore(ChessFigureColor chessColor) {
+    if (this.hasWon(chessColor) || this.hasLost(chessColor))
+      return super.getScore(chessColor);
     return -super.getScore(chessColor);
   }
   
@@ -61,56 +63,42 @@ class AntichessCheckerboard extends Checkerboard {
   }
   
   @Override
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards() {
+  public HashSet<Checkerboard> getSuccessionalBoards() {
     return this.filterBoards(super.getSuccessionalBoards());
   }
   
   @Override
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards(ChessFigureColor chessColor) {
+  public HashSet<Checkerboard> getSuccessionalBoards(ChessFigureColor chessColor) {
     return this.filterBoards(super.getSuccessionalBoards(chessColor));
   }
   
   @Override
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards(ChessFigure figure) {
+  public HashSet<Checkerboard> getSuccessionalBoards(ChessFigure figure) {
     return this.filterBoards(super.getSuccessionalBoards(figure));
   }
   
   @Override
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithPawn(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = super.getSuccessionalBoardsWithPawn(figure);
-    HashMap<Checkerboard, ChessMovement> kings = new HashMap<Checkerboard, ChessMovement>();
-    
-    for (Entry<Checkerboard, ChessMovement> entry : boards.entrySet()) {
-      if (entry.getValue().toType != null && entry.getValue().toType != ChessFigureType.PAWN) {
-        Checkerboard board = new Checkerboard(this);
-        ChessMovement movement = new ChessMovement(entry.getValue());
-        movement.toType = ChessFigureType.KING;
-        movement.apply(board);
-        kings.put(board, movement);
-      }
-    }
-    
-    boards.putAll(kings);
-    return boards;
+  protected boolean isValidPawnTransformationGoal(ChessFigureType type) {
+	  return type != ChessFigureType.PAWN;
   }
   
   /**
-   * Entfernt alle invaliden Züge, die aufgrund von Sonderregeln wegfallen, aus einer Zuordnung möglicher Züge.
+   * Entfernt alle invaliden Züge, die aufgrund von Sonderregeln wegfallen, aus einer Menge möglicher Züge.
    * 
-   * @param boards die Zuordnung möglicher Züge
-   * @return die Zuordnung möglicher Züge nach dem Entfernen invalider Züge
+   * @param boards die Menge möglicher Züge
+   * @return die Menge möglicher Züge nach dem Entfernen invalider Züge
    */
-  protected HashMap<Checkerboard, ChessMovement> filterBoards(HashMap<Checkerboard, ChessMovement> boards) {
-    HashMap<Checkerboard, ChessMovement> filtered = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> filterBoards(HashSet<Checkerboard> boards) {
+    HashSet<Checkerboard> filtered = new HashSet<Checkerboard>();
     int minFigures = this.figures.size();
     
-    for (Entry<Checkerboard, ChessMovement> entry : boards.entrySet()) {
-      if (entry.getKey().figures.size() < minFigures) {
-        minFigures = entry.getKey().figures.size();
+    for (Checkerboard board : boards) {
+      if (board.figures.size() < minFigures) {
+        minFigures = board.figures.size();
         filtered.clear();
       }
-      if (entry.getKey().figures.size() == minFigures)
-        filtered.put(new AntichessCheckerboard(entry.getKey()), entry.getValue());
+      if (board.figures.size() == minFigures)
+        filtered.add(new AntichessCheckerboard(board));
     }
         
     return filtered;

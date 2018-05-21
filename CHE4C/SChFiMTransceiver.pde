@@ -43,14 +43,75 @@ class SChFiMTransceiver extends SerialTransceiver {
   }
   
   /**
-   * Sendet einen Schachzug über die serielle Schnittstelle.
+   * Sendet die Änderungen, welche nötig sind um vom ersten Brett zum zweiten Brett zu gelangen.
    * Bricht die Verbindung ab, falls ein Fehler auftritt.
    * 
-   * @param movement der Schachzug, welcher gesendet werden soll
+   * @param initial der Startzustand des Bretts
+   * @param goal der Zielzustand des Bretts
+   * @param avalible eine Liste von Figuren, welche zusätzlich zur Verfügung stehen (z.B. für die Bauernumwandlung)
    * @return Wahrheitswert, ob das Senden erfolgreich war
+   * @throws FigureNotFoundException falls eine benötigte Figur nicht gefunden wurde
    */
-  public boolean transmit(ChessMovement movement) {
-    return this.transmit(movement.toSChFiMCommandSequence());
+  public boolean transmitDifference(Checkerboard initial, Checkerboard goal, ArrayList<ChessFigure> avalible) throws FigureNotFoundException {
+    if (initial == null || goal == null || avalible == null)
+      return true;
+    for (String command : getDifference(initial, goal, avalible))
+      if (!this.transmit(command + "\n"))
+        return false;
+      delay(5);
+    return true;
+  }
+  
+  /**
+   * Berechnet die Befehlssequenz, welche nötig ist um vom ersten Brett zum zweiten Brett zu gelangen.
+   * 
+   * @param initial der Startzustand des Bretts
+   * @param goal der Zielzustand des Bretts
+   * @param avalible eine Liste von Figuren, welche zusätzlich zur Verfügung stehen (z.B. für die Bauernumwandlung)
+   * @return die Befehlssequenz; einzelne Befehle sind die Einträge eines String-Arrays
+   * @throws FigureNotFoundException falls eine benötigte Figur nicht gefunden wurde
+   */
+  protected String[] getDifference(Checkerboard initial, Checkerboard goal, ArrayList<ChessFigure> avalible) throws FigureNotFoundException {
+    Checkerboard intermediate;
+    StringBuilder commandSequence = new StringBuilder();
+    
+    try {
+      intermediate = checkerboardClass.getConstructor(CHE4C.class, Checkerboard.class).newInstance(this, initial);
+    } catch (Exception ex) {
+      checkerboardClass = Checkerboard.class;
+      intermediate = new Checkerboard(initial);
+    }
+    
+    for (ChessFigure initialFigure : initial.figures) {
+      ChessFigure tempFigure = goal.getFigureOn(initialFigure.getPositionX(), initialFigure.getPositionY());
+      
+      if (tempFigure == null || initialFigure.type != tempFigure.type || initialFigure.chessColor != tempFigure.chessColor)
+        avalible.add(initialFigure);
+    }
+    for (ChessFigure goalFigure : goal.figures) {
+      ChessFigure tempFigure = intermediate.getFigureOn(goalFigure.getPositionX(), goalFigure.getPositionY());
+      
+      if (tempFigure == null || goalFigure.type != tempFigure.type || goalFigure.chessColor != tempFigure.chessColor) {
+        if (tempFigure != null) {
+          commandSequence.append(String.format("/r %d %d \n", tempFigure.getPositionX(), tempFigure.getPositionY()));
+          intermediate.figures.remove(tempFigure);
+        }
+        
+        ChessFigure found = null;
+        for (ChessFigure figure : avalible) {
+          if (goalFigure.type == figure.type && goalFigure.chessColor == figure.chessColor) {
+            found = figure;
+            break;
+          }
+        }
+        if (found != null) {
+          commandSequence.append(String.format("/m %d %d %d %d \n", found.getPositionX(), found.getPositionY(), goalFigure.getPositionX(), goalFigure.getPositionY()));
+        } else {
+          throw new FigureNotFoundException(goalFigure.type, goalFigure.chessColor);
+        }
+      }
+    }
+    return commandSequence.toString().split("\n");
   }
   
   @Override

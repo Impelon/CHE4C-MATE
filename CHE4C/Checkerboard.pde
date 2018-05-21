@@ -1,3 +1,5 @@
+import java.util.HashSet;
+
 {
   checkerboardClasses.add(Checkerboard.class);
 }
@@ -9,8 +11,6 @@
 class Checkerboard implements Comparable<Checkerboard> {
   
   protected ArrayList<ChessFigure> figures;
-  protected boolean whiteUsedCastling = false;
-  protected boolean blackUsedCastling = false;
   
   /**
    * Erstellt eine Instanz von Checkerboard.
@@ -54,14 +54,11 @@ class Checkerboard implements Comparable<Checkerboard> {
     this.figures = new ArrayList<ChessFigure>(board.figures.size());
     for (ChessFigure figure : board.figures)
       this.figures.add(new ChessFigure(figure));
-    
-    this.whiteUsedCastling = board.whiteUsedCastling;
-    this.blackUsedCastling = board.blackUsedCastling;
   }
   
   @Override
   public int compareTo(Checkerboard other) {
-    return Integer.compare(this.getBoardScore(), other.getBoardScore());
+    return Integer.compare(abs(this.getScore(ChessFigureColor.WHITE)), abs(other.getScore(ChessFigureColor.WHITE)));
   }
   
   /**
@@ -83,18 +80,6 @@ class Checkerboard implements Comparable<Checkerboard> {
       else
         score -= this.getFigureScore(figure);
     return score;
-  }
-  
-  /**
-   * Berechnet den Gesamtwert des Spielbretts.
-   *
-   * @return den Gesamtwert des Spielbretts, welcher sich durch die Figuren auf dem Brett ergeben.
-   */
-  public int getBoardScore() {
-    int boardScore = 0;
-    for (ChessFigure figure : this.figures)
-      boardScore += this.getFigureScore(figure);
-    return boardScore;
   }
   
   /**
@@ -122,14 +107,15 @@ class Checkerboard implements Comparable<Checkerboard> {
     return (int) (scalar * figure.type.getRelativeValue());
   }
   
-    /**
+  /**
    * Gibt zurück, ob das angegebene Schachbrett Resultat eines Spielzuges sein kann.
+   * Falls dies der Fall ist, wird das angegebene Schachbrett modifiziert, um Rochaden und bewegte Figuren zu markieren.
    *
    * @param board das andere Schachbrett
    * @return ob das angegebene Schachbrett durch einen einzigen, validen Schachzug zum momentanen Schachbrett gebracht werden kann
    */
   public boolean isSuccessionalBoard(Checkerboard board) {
-    for (Checkerboard b : this.getSuccessionalBoards().keySet()) {
+    for (Checkerboard b : this.getSuccessionalBoards()) {
       boolean same = true;
       for (ChessFigure f1 : board.figures) {
         ChessFigure f2 = b.getFigureOn(f1.getPositionX(), f1.getPositionY());
@@ -147,21 +133,24 @@ class Checkerboard implements Comparable<Checkerboard> {
             break;
         }
       }
-      if (same)
+      if (same) {
+        board.figures = b.figures;
         return true;
+      }
     }
     return false;
   }
   
   /**
    * Gibt zurück, ob das angegebene Schachbrett Resultat eines Spielzuges der Spielerfarbe sein kann.
+   * Falls dies der Fall ist, wird das angegebene Schachbrett modifiziert, um Rochaden und bewegte Figuren zu markieren.
    *
    * @param board das andere Schachbrett
    * @param chessColor die Spielerfarbe
    * @return ob das angegebene Schachbrett durch einen einzigen, validen Schachzug des angegebenen Spielers zum momentanen Schachbrett gebracht werden kann
    */
   public boolean isSuccessionalBoard(Checkerboard board, ChessFigureColor chessColor) {
-    for (Checkerboard b : this.getSuccessionalBoards(chessColor).keySet()) {
+    for (Checkerboard b : this.getSuccessionalBoards(chessColor)) {
       boolean same = true;
       for (ChessFigure f1 : board.figures) {
         ChessFigure f2 = b.getFigureOn(f1.getPositionX(), f1.getPositionY());
@@ -179,8 +168,10 @@ class Checkerboard implements Comparable<Checkerboard> {
             break;
         }
       }
-      if (same)
+      if (same) {
+        board.figures = b.figures;
         return true;
+      }
     }
     return false;  
   }
@@ -255,38 +246,38 @@ class Checkerboard implements Comparable<Checkerboard> {
   }
     
   /**
-   * Berechnet alle möglichen Züge aus dem momentanen Spielzustand und gibt eine Zuordnung der veränderten Schachbretter zu den jeweiligen Schachzügen wieder.
+   * Berechnet alle möglichen Züge aus dem momentanen Spielzustand und gibt eine Menge der veränderten Schachbretter wieder.
    *
-   * @return eine Zuordnung von Spielbrettern zu ihren dazugehörigen Schachzügen
+   * @return eine Menge von Spielbrettern
    */
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards() {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  public HashSet<Checkerboard> getSuccessionalBoards() {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     for (ChessFigure figure : this.figures)
-      boards.putAll(this.getSuccessionalBoards(figure));
+      boards.addAll(this.getSuccessionalBoards(figure));
     return boards;
   }
   
   /**
-   * Berechnet alle möglichen Züge der angegebenen Spielerfarbe aus dem momentanen Spielzustand und gibt eine Zuordnung der veränderten Schachbretter zu den jeweiligen Schachzügen wieder.
+   * Berechnet alle möglichen Züge der angegebenen Spielerfarbe aus dem momentanen Spielzustand und gibt eine Menge der veränderten Schachbretter wieder.
    * 
    * @param chessColor die Spielerfarbe
-   * @return eine Zuordnung von Spielbrettern zu ihren dazugehörigen Schachzügen
+   * @return eine Menge von Spielbrettern
    */
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards(ChessFigureColor chessColor) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  public HashSet<Checkerboard> getSuccessionalBoards(ChessFigureColor chessColor) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     for (ChessFigure figure : this.figures)
       if (figure.chessColor == chessColor)
-        boards.putAll(this.getSuccessionalBoards(figure));
+        boards.addAll(this.getSuccessionalBoards(figure));
     return boards;
   }
   
   /**
-   * Berechnet alle möglichen Züge der angegebenen Figur (welche sich auf dem Brett bereits befindet) aus dem momentanen Spielzustand und gibt eine Zuordnung der veränderten Schachbretter zu den jeweiligen Schachzügen wieder.
+   * Berechnet alle möglichen Züge der angegebenen Figur (welche sich auf dem Brett bereits befindet) aus dem momentanen Spielzustand und gibt eine Menge der veränderten Schachbretter wieder.
    * 
    * @param figure die Figur, welche die Züge tätigen soll.
-   * @return eine Zuordnung von Spielbrettern zu ihren dazugehörigen Schachzügen
+   * @return eine Menge von Spielbrettern
    */
-  public HashMap<Checkerboard, ChessMovement> getSuccessionalBoards(ChessFigure figure) {
+  public HashSet<Checkerboard> getSuccessionalBoards(ChessFigure figure) {
     if (this.figures.contains(figure)) {
       switch (figure.type) {
         case KING:
@@ -304,7 +295,42 @@ class Checkerboard implements Comparable<Checkerboard> {
       }
     }
 
-    return new HashMap<Checkerboard, ChessMovement>();
+    return new HashSet<Checkerboard>();
+  }
+  
+  /**
+   * Hilfsfunktion: Führt den Bewegungsablauf auf einem Schachbrett aus.
+   * 
+   * @param board Schachbrett, auf dem der Bewegungsablauf ausgeführt wird
+   * @param fromX die x-Position der Figur auf dem Brett (0 - 7)
+   * @param fromY die y-Position der Figur auf dem Brett (0 - 7)
+   * @param toX die neue x-Position auf dem Brett (0 - 7)
+   * @param toY die neue y-Position auf dem Brett (0 - 7)
+   * @param castling ob der Zug eine Rochade darstellt, d.h. ob die Figur auf dem Zielfeld auch bewegt werden soll
+   * @param removes ob der Schachzug eine Figur entfernt
+   * @param toType Typ der Figur, falls sich dieser verändert (Dame, König, Bauer, etc.)
+   */
+  protected void apply(Checkerboard board, byte fromX, byte fromY, byte toX, byte toY, boolean castling, boolean removes, ChessFigureType toType) {
+    if (removes)
+	  board.figures.remove(board.getFigureOn(toX, toY));
+	if (castling) {
+      // (n >> 7) | 1 gibt für ein byte n dessen Vorzeichen an
+	  board.getFigureOn(fromX, fromY).setPosition((byte) ((((toX - fromX) >> 7) | 1) * 2 + fromX), toY);
+	  board.getFigureOn(toX, toY).setPosition((byte) ((((toX - fromX) >> 7) | 1) + fromX), fromY);
+    } else
+        board.getFigureOn(fromX, fromY).setPosition(toX, toY);
+      if (toType != null)
+        board.getFigureOn(toX, toY).type = toType;
+  }
+  
+  /**
+   * Gibt zurück, ob der Figurentyp bei einer Bauernumwandlung verwendet werden darf.
+   * 
+   * @param type Zieltyp der Figur
+   * @return ob der Figurentyp valid ist
+   */
+  protected boolean isValidPawnTransformationGoal(ChessFigureType type) {
+	  return type != ChessFigureType.PAWN && type != ChessFigureType.KING;
   }
   
   /*
@@ -314,8 +340,8 @@ class Checkerboard implements Comparable<Checkerboard> {
    * Desshalb sollten diese Methoden nicht von außerhalb angesprochen werden.
    */
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithKing(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithKing(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
         
     // Acht Nachbarfelder
     byte x;
@@ -331,16 +357,15 @@ class Checkerboard implements Comparable<Checkerboard> {
         ChessFigure tempFigure = this.getFigureOn(x, y);
         if (tempFigure == null || tempFigure.chessColor.getOpposing() == figure.chessColor) {
           Checkerboard board = new Checkerboard(this);
-          ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null);
-          movement.apply(board);
-          boards.put(board, movement);
+          this.apply(board, figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null, null);
+          boards.add(board);
         }
       }
     }
     
     // Rochade
     // eine weniger flexible Rochade wäre mit Chess960 kompatibel
-    if (!(figure.hasMoved() || (figure.chessColor == ChessFigureColor.WHITE ? this.whiteUsedCastling : this.blackUsedCastling))) {
+    if (!figure.hasMoved()) {
       for (byte dir = 0; dir < 2; dir++) {
         byte offset = (byte) (dir % 2 == 0 ? 1 : -1);
         for (x = (byte) (figure.getPositionX() + offset); x < 8 && x >= 0; x += offset) {
@@ -350,9 +375,8 @@ class Checkerboard implements Comparable<Checkerboard> {
           else {
             if (tempFigure.chessColor == figure.chessColor && tempFigure.type == ChessFigureType.ROOK && !tempFigure.hasMoved()) {
               Checkerboard board = new Checkerboard(this);
-              ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, figure.getPositionY(), true, false);
-              movement.apply(board);
-              boards.put(board, movement);
+              this.apply(board, figure.getPositionX(), figure.getPositionY(), x, figure.getPositionY(), true, false, null);
+              boards.add(board);
             }
             break;
           }
@@ -363,18 +387,18 @@ class Checkerboard implements Comparable<Checkerboard> {
     return boards;
   }
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithQueen(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithQueen(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     
     // Vier Diagonalen und vier Himmelsrichtungen
-    boards.putAll(this.getSuccessionalBoardsWithRook(figure));
-    boards.putAll(this.getSuccessionalBoardsWithBishop(figure));
+    boards.addAll(this.getSuccessionalBoardsWithRook(figure));
+    boards.addAll(this.getSuccessionalBoardsWithBishop(figure));
     
     return boards;
   }
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithRook(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithRook(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     
     // Vier Himmelsrichtungen
     for (byte dir = 0; dir < 4; dir++) {
@@ -400,9 +424,8 @@ class Checkerboard implements Comparable<Checkerboard> {
         ChessFigure tempFigure = this.getFigureOn(x, y);
         if (tempFigure == null || tempFigure.chessColor.getOpposing() == figure.chessColor) {
           Checkerboard board = new Checkerboard(this);
-          ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null);
-          movement.apply(board);
-          boards.put(board, movement);
+          this.apply(board, figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null, null);
+          boards.add(board);
         }
         if (tempFigure != null)
           break;
@@ -412,8 +435,8 @@ class Checkerboard implements Comparable<Checkerboard> {
     return boards;
   }
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithBishop(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithBishop(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     
     // Vier Diagonalen
     for (byte dir = 0; dir < 4; dir++) {
@@ -440,9 +463,8 @@ class Checkerboard implements Comparable<Checkerboard> {
         ChessFigure tempFigure = this.getFigureOn(x, y);
         if (tempFigure == null || tempFigure.chessColor.getOpposing() == figure.chessColor) {
           Checkerboard board = new Checkerboard(this);
-          ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null);
-          movement.apply(board);
-          boards.put(board, movement);
+          this.apply(board, figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null, null);
+          boards.add(board);
         }
         if (tempFigure != null)
           break;
@@ -452,8 +474,8 @@ class Checkerboard implements Comparable<Checkerboard> {
     return boards;
   }
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithKnight(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithKnight(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     
     byte x;
     byte y;
@@ -472,17 +494,16 @@ class Checkerboard implements Comparable<Checkerboard> {
       ChessFigure tempFigure = this.getFigureOn(x, y);
       if (tempFigure == null || tempFigure.chessColor.getOpposing() == figure.chessColor) {
         Checkerboard board = new Checkerboard(this);
-        ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null);
-        movement.apply(board);
-        boards.put(board, movement);
+        this.apply(board, figure.getPositionX(), figure.getPositionY(), x, y, false, tempFigure != null, null);
+        boards.add(board);
       }
     }
     
     return boards;
   }
   
-  protected HashMap<Checkerboard, ChessMovement> getSuccessionalBoardsWithPawn(ChessFigure figure) {
-    HashMap<Checkerboard, ChessMovement> boards = new HashMap<Checkerboard, ChessMovement>();
+  protected HashSet<Checkerboard> getSuccessionalBoardsWithPawn(ChessFigure figure) {
+    HashSet<Checkerboard> boards = new HashSet<Checkerboard>();
     
     byte direction = (byte) (figure.chessColor == ChessFigureColor.WHITE ? -1 : 1);
     
@@ -490,9 +511,8 @@ class Checkerboard implements Comparable<Checkerboard> {
     if (!figure.hasMoved()) {
       if (this.getFigureOn(figure.getPositionX(), (byte) (figure.getPositionY() + direction)) == null && this.getFigureOn(figure.getPositionX(), (byte) (figure.getPositionY() + direction + direction)) == null) {
         Checkerboard board = new Checkerboard(this);
-        ChessMovement movement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), figure.getPositionX(), (byte) (figure.getPositionY() + direction + direction), false, false);
-        movement.apply(board);
-        boards.put(board, movement);
+        this.apply(board, figure.getPositionX(), figure.getPositionY(), figure.getPositionX(), (byte) (figure.getPositionY() + direction + direction), false, false, null);
+        boards.add(board);
       }
     }
       
@@ -502,17 +522,16 @@ class Checkerboard implements Comparable<Checkerboard> {
       x = (byte) (i + figure.getPositionX());
       ChessFigure tempFigure = this.getFigureOn(x, y);
       Checkerboard tempBoard = null;
-      ChessMovement tempMovement = null;
+      boolean removes = false;
       if (i == 0) {
         // Vorwärts
         if (tempFigure == null)
           tempBoard = new Checkerboard(this);
-          tempMovement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, false);
       } else {
         // Diagonalschlag
         if (tempFigure != null && tempFigure.chessColor.getOpposing() == figure.chessColor)
           tempBoard = new Checkerboard(this);
-          tempMovement = new ChessMovement(figure.getPositionX(), figure.getPositionY(), x, y, false, true);
+          removes = true;
       }
       
       if (tempBoard == null)
@@ -521,17 +540,15 @@ class Checkerboard implements Comparable<Checkerboard> {
       // Umwandlung
       if (y == (figure.chessColor == ChessFigureColor.WHITE ? 0 : 7)) {
         for (ChessFigureType type : ChessFigureType.values()) {
-          if (type != ChessFigureType.PAWN && type != ChessFigureType.KING) {
+          if (this.isValidPawnTransformationGoal(type)) {
             Checkerboard board = new Checkerboard(tempBoard);
-            ChessMovement movement = new ChessMovement(tempMovement);
-            movement.toType = type;
-            movement.apply(board);
-            boards.put(board, movement);
+            this.apply(board, figure.getPositionX(), figure.getPositionY(), x, y, false, removes, type);
+            boards.add(board);
           }
         }
       } else {
-        tempMovement.apply(tempBoard);
-        boards.put(tempBoard, tempMovement);
+    	this.apply(tempBoard, figure.getPositionX(), figure.getPositionY(), x, y, false, removes, null);
+        boards.add(tempBoard);
       }
     }
 

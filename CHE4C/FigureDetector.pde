@@ -30,11 +30,10 @@ class FigureDetector {
   public void calibrate(PImage video) {
     this.video = video;
         
-    int x = 40;
-    int y = 100;
-    int loc = x + y * video.width;
-            
-    color currentColor = video.pixels[loc];
+    int x = video.width / 8;
+    int y = video.height / 4;
+    
+    color currentColor = video.get(x, y);
     
     float r = red(currentColor);
     float g = green(currentColor);
@@ -127,15 +126,18 @@ class FigureDetector {
   /**
    * Zeichnet das Sichtfeld und die erkannten Figuren.
    */
-  public void drawFOV() {
-    image(video, 0, 0, video.width, video.height);
+  public void drawFOV(int x, int y, int w, int h) {
+    image(video, x, y, w, h);
+    
+    float ratioX = (float) w / video.width;
+    float ratioY = (float) h / video.height;
         
     strokeWeight(4.0);
     stroke(0);
     
     fill(255, 0, 0);
-    ellipse(pSX, pSY, 24, 24);
-    ellipse(pEX, pEY, 24, 24);
+    ellipse(x + pSX * ratioX, y + pSY * ratioY, 24, 24);
+    ellipse(x + pEX * ratioX, y + pEY * ratioY, 24, 24);
     
     for(int i = 0; i < 8; i++) {
       for(int j = 0; j < 8; j++) {
@@ -184,7 +186,7 @@ class FigureDetector {
         if (skip)
           continue;
         
-        ellipse((j + 0.5) * (xDif / 8) + pSX, (i + 0.5) * (yDif / 8) + pSY, 24, 24);
+        ellipse(x + ((j + 0.5) * (xDif / 8) + pSX) * ratioX, y + ((i + 0.5) * (yDif / 8) + pSY) * ratioY, 24, 24);
       }
     }
   }

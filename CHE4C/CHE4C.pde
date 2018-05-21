@@ -31,7 +31,6 @@ final String SERIAL_SELECTOR = "serial";
 final String CAPTURE_SELECTOR = "capture";
 final String SAVE_FRAMES_SELECTOR = "saveFrames";
 final String HISTORY_UNDO_BUTTON = "historyUndo";
-final String HISTORY_PICK_BUTTON = "historyPick";
 final String HISTORY_REDO_BUTTON = "historyRedo";
 final String PAUSE_BUTTON = "pause";
 final String RESET_BUTTON = "reset";
@@ -49,25 +48,25 @@ boolean saveFrames = false;
 String frameFolder;
 
 // Objekt für die serielle Kommunikation mit dem SChFiM-Interpreter
-SChFiMTransceiver movementTransceiver;
+SChFiMTransceiver movementTransceiver = null;
 // Objekt für die serielle Kommunikation mit dem SUIfM-Interpreter
-SUIfMTransceiver interactionTransceiver;
+SUIfMTransceiver interactionTransceiver = null;
 // serielle Schnittstelle
-Serial serial;
+Serial serial = null;
 // Index der Verbindung
 int serialIndex = 0;
 
 // Objekt für die Bilderkennung
 FigureDetector detector = new FigureDetector();
 // Objekt für die Bildaufnahme
-Capture capture;
+Capture capture = null;
 // Index der Webcam
 int captureIndex = 0;
 
 // Liste, die alle getätigten Züge enthält
-ArrayList<Entry<Checkerboard, ChessMovement>> executedMovements;
-// Verschiebung des Indexes welcher auf der Benutzeroberfläche gezeigt wird
-int displayIndexOffset;
+ArrayList<Checkerboard> executedMovements;
+// Verschiebung des Indexes, welcher auf das aktuelle Brett zeigt
+int boardIndexOffset;
 // Enthält die Positionen der Auswahl durch die Benutzeroberfläche
 Entry<PVector, PVector> selection = null;
 // Enthält den Figurentyp der Auswahl durch die Benutzeroberfläche (wird bei der Umwandlung von Bauern benutzt)
@@ -75,8 +74,6 @@ ChessFigureType typeSelection = null;
 // Wahrheitswert, ob der ausgewählte Zug ausgeführt werden soll
 boolean confirmedSelection = false;
 
-// Objekt für das aktuelle Spielbrett
-Checkerboard board;
 // Klasse des Spielbretts; Bestimmt somit den Spielmodi
 // kurze Anmekrung am Rande: Da .pde-Klassen als innere Klassen implementiert werden, ist der Sketch (this) immer als Parameter jedes Konstruktors übergeben
 Class<? extends Checkerboard> checkerboardClass = Checkerboard.class;
@@ -105,19 +102,21 @@ void settings() {
  * Funktion, welche bei Ausführung des Programms ausgeführt wird.
  */
 void setup() {
-  capture = new Capture(this, 640, 480, 30);
-  capture.start();
+  try {
+    setCapture(new Capture(this, Capture.list()[captureIndex]));
+  } catch (Exception ex) {
+    setCapture(null);
+  }
   detector = new FigureDetector();
-  capture.read();
+  while(!capture.available())
+    capture.read();
   detector.calibrate(capture);
   
   try {
-    serial = new Serial(this, Serial.list()[serialIndex], 9600);
+    setSerial(new Serial(this, Serial.list()[serialIndex], 9600));
   } catch (Exception ex) {
-    serial = null;
+    setSerial(null);
   }
-  movementTransceiver = new SChFiMTransceiver(serial);
-  interactionTransceiver = new SUIfMTransceiver(serial);
   
   movementTransceiver.setBaseSpeed(50);
   
@@ -126,6 +125,7 @@ void setup() {
   loadFigureImages();
   loadIconImages();
     
+  Checkerboard board;
   try {
     board = checkerboardClass.getConstructor(CHE4C.class, boolean.class).newInstance(this, true);
   } catch (Exception ex) {
@@ -134,10 +134,31 @@ void setup() {
   }
   
   frameFolder = "f_" + String.valueOf(day()) + "-" + String.valueOf(month()) + "-" + String.valueOf(year()) + "_" + String.valueOf(hour()) + "-" + String.valueOf(minute()) + "-" + String.valueOf(second()) + "_" + hex(int(random(100000)), 4);
-  executedMovements = new ArrayList<Entry<Checkerboard, ChessMovement>>();
-  executedMovements.add(new AbstractMap.SimpleEntry<Checkerboard, ChessMovement>(board, null));
+  executedMovements = new ArrayList<Checkerboard>();
+  executedMovements.add(board);
   round = 0;
-  displayIndexOffset = 0;
+  boardIndexOffset = 0;
+}
+
+public void setCapture(Capture c) {
+  if (capture != null)
+    capture.stop();
+  capture = c;
+  if (capture != null)
+    capture.start();
+}
+
+public void setSerial(Serial s) {
+  serial = s;
+  if (movementTransceiver == null)
+    movementTransceiver = new SChFiMTransceiver(serial);
+  else
+    movementTransceiver.connect(serial);
+  
+  if (interactionTransceiver == null)
+    interactionTransceiver = new SUIfMTransceiver(serial);
+  else
+    interactionTransceiver.connect(serial);
 }
 
 /**
@@ -150,7 +171,7 @@ void draw() {
   
   switch (view) {
     case 0:
-      drawCheckerboard(executedMovements.get(executedMovements.size() - 1 - displayIndexOffset).getKey(), fromGridX((byte) 1), fromGridY((byte) 0));
+      drawCheckerboard(executedMovements.get(executedMovements.size() - 1 - boardIndexOffset), fromGridX((byte) 1), fromGridY((byte) 0));
       drawSelection(fromGridX((byte) 1), fromGridY((byte) 0));
       break;
     case 1:
@@ -167,13 +188,12 @@ void draw() {
   drawSerialSelector(9, 0);
   drawCaptureSelector(9, 1);
   drawSaveFramesSelector(9, 2);
-  drawHistoryUndoButton(9, 3);
-  drawHistoryPickButton(9, 4);
+  drawHistoryUndoButton(9, 4);
   drawHistoryRedoButton(9, 5);
   drawPauseButton(9, 6);
   drawResetButton(9, 7);
   
-  if (!paused && (frameCount % 50 == 0)) {
+  if (!paused && (frameCount % 20 == 0)) {
     if (saveFrames)
       saveFrame("frames/" + frameFolder + "/" + str(round) + ".png");
     tryNext();
@@ -227,6 +247,14 @@ public byte toGridY(int y) {
  * Falls das Spiel bereits verloren ist, wird nichts berechnet.
  */
 public void tryNext() {
+  Checkerboard board = executedMovements.get(executedMovements.size() - 1 - boardIndexOffset);
+  try {
+    board = checkerboardClass.getConstructor(CHE4C.class, Checkerboard.class).newInstance(this, board);
+  } catch (Exception ex) {
+    checkerboardClass = Checkerboard.class;
+    board = new Checkerboard(board);
+  }
+  
   if (board.hasLost(ChessFigureColor.WHITE) || board.hasLost(ChessFigureColor.BLACK)) {
     interactionTransceiver.setControlStatus(ControlStatus.GAME_ENDED);
     return;
@@ -239,45 +267,33 @@ public void tryNext() {
     interactionTransceiver.setControlStatus(ControlStatus.CALCULATING);
     int depth = floor(32 / pow(board.figures.size() + 1, 1.4) + baseDepth);
     long t1 = System.nanoTime();
-    Entry<Checkerboard, ChessMovement> movement = miniMax(turn, new AbstractMap.SimpleEntry<Checkerboard, ChessMovement>(board, null), depth, -Integer.MAX_VALUE / 10, Integer.MAX_VALUE / 10);
+    Entry<Checkerboard, Integer> movement = miniMax(turn, new AbstractMap.SimpleEntry<Checkerboard, Integer>(board, null), depth, -Integer.MAX_VALUE / 10, Integer.MAX_VALUE / 10);
     long t2 = System.nanoTime();
     println(depth, (t2 - t1) / 1000000.0);
     
-    executedMovements.add(movement);
-    interactionTransceiver.setControlStatus(ControlStatus.MOVING);
-    delay(10);
-    movementTransceiver.transmit(movement.getValue());
-    try {
-      board = checkerboardClass.getConstructor(CHE4C.class, Checkerboard.class).newInstance(this, movement.getKey());
-    } catch (Exception ex) {
-      checkerboardClass = Checkerboard.class;
-      board = new Checkerboard(movement.getKey());
-    }
-    interactionTransceiver.resetConfirmation();
-    round++;
+    executeMovement(movement.getKey());
   // Spieler spielt
   } else {
     Checkerboard next = null;
-    ChessMovement move = null;
     
+    interactionTransceiver.setControlStatus(ControlStatus.WAITING_FOR_PLAYER);
+
     capture.read();
     detector.analyse(capture);
     
-    interactionTransceiver.setControlStatus(ControlStatus.WAITING_FOR_PLAYER);
     // Zug über Benutzeroberfläche getätigt
     if (selection != null && selection.getKey() != null && selection.getValue() != null && confirmedSelection) {
       if (board.getFigureOn((byte) selection.getKey().x, (byte) selection.getKey().y) != null && !selection.getKey().equals(selection.getValue())) {
         ChessFigure toFigure = board.getFigureOn((byte) selection.getValue().x, (byte) selection.getValue().y);
         boolean castling = board.getFigureOn((byte) selection.getKey().x, (byte) selection.getKey().y).type == ChessFigureType.KING && (toFigure != null && toFigure.type == ChessFigureType.ROOK);
-        move = new ChessMovement((byte) selection.getKey().x, (byte) selection.getKey().y, (byte) selection.getValue().x, (byte) selection.getValue().y, 
-              castling, !castling && toFigure != null, typeSelection);
         try {
           next = checkerboardClass.getConstructor(CHE4C.class, Checkerboard.class).newInstance(this, board);
         } catch (Exception ex) {
           checkerboardClass = Checkerboard.class;
           next = new Checkerboard(board);
         }
-        move.apply(next);
+        next.apply(next, (byte) selection.getKey().x, (byte) selection.getKey().y, (byte) selection.getValue().x, (byte) selection.getValue().y, 
+                castling, !castling && toFigure != null, typeSelection);
       }
     } else if (interactionTransceiver.getConfirmation()) {
       interactionTransceiver.resetConfirmation();
@@ -293,14 +309,7 @@ public void tryNext() {
       
     if (next != null) {
       if (board.isSuccessionalBoard(next, turn)) {
-        executedMovements.add(new AbstractMap.SimpleEntry<Checkerboard, ChessMovement>(next, move));
-        getDifference(board, next);
-        interactionTransceiver.setControlStatus(ControlStatus.MOVING);
-        delay(10);
-        if (move != null)
-          movementTransceiver.transmit(move);
-        board = next;
-        round++;
+    	  executeMovement(next);
       } else {
         interactionTransceiver.setControlStatus(ControlStatus.INVALID_BOARD);
       }
@@ -312,38 +321,58 @@ public void tryNext() {
 }
 
 /**
+ * Hilfsfunktion zur Zugausführung.
+ * Versucht das Spielbrett in den neuen Zustand zu überführen.
+ * 
+ * @param board das neue Brett
+ */
+protected void executeMovement(Checkerboard board) {
+  try {
+    interactionTransceiver.setControlStatus(ControlStatus.MOVING);
+    delay(10);
+    movementTransceiver.transmitDifference(executedMovements.get(executedMovements.size() - 1 - boardIndexOffset), board, new ArrayList<ChessFigure>());
+ 	  interactionTransceiver.resetConfirmation();
+	  executedMovements.add(board);
+	  round++;
+  } catch (FigureNotFoundException ex) {
+	  interactionTransceiver.setControlStatus(ControlStatus.MISSING_FIGURE);
+  }
+}
+
+/**
  * Wählt mit Hilfe des MiniMax-Algorithmus den optimalen  nächsten Zug aus.
  * Diese Implemenation entspricht der NegaMax-Variante (https://de.wikipedia.org/wiki/Minimax-Algorithmus)
  * und benutzt die Alpha-Beta-Suche zur Minimierung der Laufzeit (https://de.wikipedia.org/wiki/Alpha-Beta-Suche).
  * 
  * @param player Spielerfarbe, welche den Zug tätigen soll
- * @param current Zuordnung des aktuellen Spielbretts zu seinem dazugehörigen Schachzug (soll im externen Aufruf das aktuelle Spielbrett enthalten; ein dazugehöriger Schachzug ist nicht benötigt)
+ * @param current Zuordnung des aktuellen Spielbretts zu seiner dazugehörigen Bewertung (soll im externen Aufruf das aktuelle Spielbrett enthalten; eine dazugehörige Bewertung ist nicht benötigt)
  * @param depth aktuelle Suchtiefe
  * @param alpha aktuelle untere Schranke (soll im externen Aufruf -Integer.MAX_VALUE / 10 sein)
  * @param beta aktuelle obere Schranke (soll im externen Aufruf Integer.MAX_VALUE / 10 sein)
  * @return der Zuordnung des Spielbretts zu seinem dazugehörigen Schachzug, welcher ausgewählt wurde
  */
-protected Entry<Checkerboard, ChessMovement> miniMax(ChessFigureColor player, Entry<Checkerboard, ChessMovement> current, float depth, int alpha, int beta) {
+protected Entry<Checkerboard, Integer> miniMax(ChessFigureColor player, Entry<Checkerboard, Integer> current, float depth, int alpha, int beta) {
   if (depth <= 0 || current.getKey().hasLost(player) || current.getKey().hasWon(player)) {
-    current.getValue().score = current.getKey().getScore(player);
+    current.setValue(current.getKey().getScore(player));
     return current;
   }
   
-  HashMap<Checkerboard, ChessMovement> movements = current.getKey().getSuccessionalBoards(player);
+  HashSet<Checkerboard> movements = current.getKey().getSuccessionalBoards(player);
   int maxScore = alpha;
-  Entry<Checkerboard, ChessMovement> move = current;
+  Entry<Checkerboard, Integer> move = current;
   
-  for (Entry<Checkerboard, ChessMovement> e : movements.entrySet()) {
-    float actualDepth = depth - (current.getKey().figures.size() > e.getKey().figures.size() ? 
-          map(constrain(abs(current.getKey().getScore(player) - e.getKey().getScore(player)),
+  for (Checkerboard board : movements) {
+    float actualDepth = depth - (current.getKey().figures.size() > board.figures.size() ? 
+          map(constrain(abs(current.getKey().getScore(player) - board.getScore(player)),
           0, ChessFigureType.QUEEN.getRelativeValue() + ChessFigureType.PAWN.getRelativeValue()), 
           0, ChessFigureType.QUEEN.getRelativeValue() + ChessFigureType.PAWN.getRelativeValue(),
           0.7, 0) : 1);
-    int score = -miniMax(player.getOpposing(), e, actualDepth, -beta, -maxScore).getValue().score;
-    e.getValue().score = score;
+    Entry<Checkerboard, Integer> temp = new AbstractMap.SimpleEntry<Checkerboard, Integer>(board, Integer.MIN_VALUE + 1);
+    int score = -miniMax(player.getOpposing(), temp, actualDepth, -beta, -maxScore).getValue();
+    temp.setValue(score);
     if (score > maxScore) {
       maxScore = score;
-      move = e;
+      move = temp;
       if (maxScore >= beta)
         break;
     }
@@ -462,6 +491,7 @@ public void drawWinnerDisplay(int x, int y) {
   fill(#FFFFFF);
   text("Winner:", x, y, pxFieldSize, pxFieldSize);
   
+  Checkerboard board = executedMovements.get(executedMovements.size() - 1 - boardIndexOffset);
   ChessFigure tempFigure;
   if (board.hasWon(ChessFigureColor.WHITE))
     tempFigure = new ChessFigure(ChessFigureType.KING, ChessFigureColor.WHITE, (byte) 0, (byte) 0);
@@ -693,7 +723,7 @@ public void drawHistoryUndoButton(int x, int y) {
   x = fromGridX((byte) x);
   y = fromGridY((byte) y);
   
-  fill(0x999999FF);
+  fill(boardIndexOffset == executedMovements.size() - 1 ? 0x99999999 : 0x999999FF);
   stroke(#BBBBBB);
   strokeWeight(5);
   rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
@@ -716,34 +746,6 @@ public void drawHistoryUndoButton(int x, int y) {
 }
 
 /**
- * Zeichnet einen Schalter, der bei Betätigung die ausgewähtle Ebene als Spielfeld festlegt.
- * Die Größe entspricht der pixel-Feldgröße.
- * 
- * @param x x-Gitter-Koordinate der oberen, linken Ecke des Schalters
- * @param y y-Gitter-Koordinate der oberen, linken Ecke des Schalters
- */
-public void drawHistoryPickButton(int x, int y) {
-  elementGrid.put(HISTORY_PICK_BUTTON, new AbstractMap.SimpleEntry<Byte, Byte>((byte) x, (byte) y));
-  x = fromGridX((byte) x);
-  y = fromGridY((byte) y);
-  
-  fill(0x99999999);
-  stroke(#BBBBBB);
-  strokeWeight(5);
-  rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
-  
-  fill(#FFFFFF);
-  noStroke();
-  rect(x + pxFieldSize / 3, y + pxFieldSize / 3, pxFieldSize / 3, pxFieldSize / 3);
-  
-  fill(displayIndexOffset == 0 ? #00FF00 : #000000);
-  rect(x + 2 * pxFieldSize / 5, y + 2 * pxFieldSize / 5, pxFieldSize / 5, pxFieldSize / 5);
-  
-  fill(#FFFFFF);
-  rect(x + 0.45 * pxFieldSize, y + 0.45 * pxFieldSize, 0.1 * pxFieldSize, 0.1 * pxFieldSize);
-}
-
-/**
  * Zeichnet einen Schalter, der bei Betätigung die eine Ebene nach unten in den ausgeführten Bewegungen geht.
  * Die Größe entspricht der pixel-Feldgröße.
  * 
@@ -755,7 +757,7 @@ public void drawHistoryRedoButton(int x, int y) {
   x = fromGridX((byte) x);
   y = fromGridY((byte) y);
   
-  fill(0x999999FF);
+  fill(boardIndexOffset == 0 ? 0x99999999 : 0x999999FF);
   stroke(#BBBBBB);
   strokeWeight(5);
   rect(x + pxFieldSize / 4, y + pxFieldSize / 4, pxFieldSize / 2, pxFieldSize / 2);
@@ -866,13 +868,6 @@ void mouseClicked() {
       checkerboardClass = checkerboardClasses.get(index);
     else
       checkerboardClass = checkerboardClasses.get(0);
-    
-    try {
-      board = checkerboardClass.getConstructor(CHE4C.class, Checkerboard.class).newInstance(this, board);
-    } catch (Exception ex) {
-      checkerboardClass = Checkerboard.class;
-      board = new Checkerboard(board);
-    }
   }
   
   if (elementGrid.get(BASE_DEPTH_SELECTOR) != null && elementGrid.get(BASE_DEPTH_SELECTOR).getKey() == gridX && elementGrid.get(BASE_DEPTH_SELECTOR).getValue() == gridY) {
@@ -897,6 +892,11 @@ void mouseClicked() {
       if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
         if (Serial.list().length > 0) {
           serialIndex = (serialIndex + 1) % Serial.list().length;
+          try {
+            setSerial(new Serial(this, Serial.list()[serialIndex], 9600));
+          } catch (Exception ex) {
+            setSerial(null);
+          }
         }
       }
   }
@@ -908,6 +908,7 @@ void mouseClicked() {
       if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
         if (Capture.list().length > 0) {
           captureIndex = (captureIndex + 1) % Capture.list().length;
+          setCapture(new Capture(this, Capture.list()[captureIndex]));
         }
       }
   }
@@ -927,21 +928,9 @@ void mouseClicked() {
     
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
-        displayIndexOffset = constrain(displayIndexOffset + 1, 0, executedMovements.size() - 1);
+        boardIndexOffset = constrain(boardIndexOffset + 1, 0, executedMovements.size() - 1);
         paused = true;
-      }
-  }
-  
-  if (elementGrid.get(HISTORY_PICK_BUTTON) != null && elementGrid.get(HISTORY_PICK_BUTTON).getKey() == gridX && elementGrid.get(HISTORY_PICK_BUTTON).getValue() == gridY) {
-    int x = mouseX - fromGridX(gridX);
-    int y = mouseY - fromGridY(gridY);
-    
-    if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
-      if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
-        board = executedMovements.get(executedMovements.size() - 1 - displayIndexOffset).getKey();
-        executedMovements.subList(executedMovements.size() - displayIndexOffset, executedMovements.size()).clear();
-        round -= displayIndexOffset;
-        displayIndexOffset = 0;
+        confirmedSelection = false;
       }
   }
   
@@ -951,7 +940,8 @@ void mouseClicked() {
     
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
-        displayIndexOffset = constrain(displayIndexOffset - 1, 0, executedMovements.size() - 1);
+        boardIndexOffset = constrain(boardIndexOffset - 1, 0, executedMovements.size() - 1);
+        confirmedSelection = false;
       }
   }
   
@@ -970,8 +960,7 @@ void mouseClicked() {
     
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4)
-        if (displayIndexOffset == 0)
-          paused = !paused;
+        paused = !paused;
   }
   
   if (mouseX >= fromGridX((byte) 1) && mouseX < fromGridX((byte) 9) && mouseY >= fromGridY((byte) 0) && mouseY < fromGridY((byte) 8)) {
@@ -1016,7 +1005,7 @@ void mouseWheel() {
 void keyPressed() {
   if (mouseX >= fromGridX((byte) 1) && mouseX < fromGridX((byte) 9) && mouseY >= fromGridY((byte) 0) && mouseY < fromGridY((byte) 8)) {
     if (key == ENTER || key == RETURN)
-      if (displayIndexOffset == 0 && view == 0)
+      if (view == 0)
         confirmedSelection = true;
     if (key == DELETE) {
       selection = null;
