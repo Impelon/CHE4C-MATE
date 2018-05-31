@@ -55,13 +55,17 @@ SUIfMTransceiver interactionTransceiver = null;
 Serial serial = null;
 // Index der Verbindung
 int serialIndex = 0;
+// Wird periodisch auf Serial.list() gesetzt. (Serial.list() benötigt einen nicht vernachlässigbaren Zeitaufwand, vorallem bei mehreren seriellen Schnittstellen)
+String[] seriallist;
 
 // Objekt für die Bilderkennung
-FigureDetector detector = new FigureDetector();
+FigureDetector detector = null;
 // Objekt für die Bildaufnahme
 Capture capture = null;
 // Index der Webcam
 int captureIndex = 0;
+// Wird periodisch auf Capture.list() gesetzt. (Capture.list() benötigt einen nicht vernachlässigbaren Zeitaufwand, vorallem bei mehreren Webcams)
+String[] capturelist;
 
 // Liste, die alle getätigten Züge enthält
 ArrayList<Checkerboard> executedMovements;
@@ -102,18 +106,21 @@ void settings() {
  * Funktion, welche bei Ausführung des Programms ausgeführt wird.
  */
 void setup() {
+  capturelist = Capture.list();
+  seriallist = Serial.list();
+  
   try {
-    setCapture(new Capture(this, Capture.list()[captureIndex]));
+    setCapture(new Capture(this, capturelist[captureIndex]));
   } catch (Exception ex) {
     setCapture(null);
   }
-  detector = new FigureDetector();
+  detector = new AutonomousFigureDetector();
   while(!capture.available())
     capture.read();
   detector.calibrate(capture);
   
   try {
-    setSerial(new Serial(this, Serial.list()[serialIndex], 9600));
+    setSerial(new Serial(this, seriallist[serialIndex], 9600));
   } catch (Exception ex) {
     setSerial(null);
   }
@@ -140,27 +147,6 @@ void setup() {
   boardIndexOffset = 0;
 }
 
-public void setCapture(Capture c) {
-  if (capture != null)
-    capture.stop();
-  capture = c;
-  if (capture != null)
-    capture.start();
-}
-
-public void setSerial(Serial s) {
-  serial = s;
-  if (movementTransceiver == null)
-    movementTransceiver = new SChFiMTransceiver(serial);
-  else
-    movementTransceiver.connect(serial);
-  
-  if (interactionTransceiver == null)
-    interactionTransceiver = new SUIfMTransceiver(serial);
-  else
-    interactionTransceiver.connect(serial);
-}
-
 /**
  * Funktion, welche nach dem Startvorgang wiederholt ausgeführt wird.
  * Zeichnet die Benutzeroberfläche.
@@ -176,6 +162,11 @@ void draw() {
       break;
     case 1:
       detector.drawFOV(fromGridX((byte) 1), fromGridY((byte) 1), pxFieldSize * 8, pxFieldSize * 6);
+      break;
+    case 2:
+      Checkerboard board = new Checkerboard(false);
+      board.figures = detector.getFigures();
+      drawCheckerboard(board, fromGridX((byte) 1), fromGridY((byte) 0));
       break;
   }
   
@@ -198,6 +189,39 @@ void draw() {
       saveFrame("frames/" + frameFolder + "/" + str(round) + ".png");
     tryNext();
   }
+}
+
+/**
+ * Setzt das Capture für die Bilderkennung.
+ * 
+ * @param c das Capture (Webcam)
+ */
+public void setCapture(Capture c) {
+  if (capture != null)
+    capture.stop();
+  capture = c;
+  if (capture != null)
+    capture.start();
+}
+
+/**
+ * Setzt die serielle Schnittstelle für die Kommunikation mit dem Arduino.
+ * 
+ * @param s die serielle Schnittstelle
+ */
+public void setSerial(Serial s) {
+  seriallist = Serial.list();
+  
+  serial = s;
+  if (movementTransceiver == null)
+    movementTransceiver = new SChFiMTransceiver(serial);
+  else
+    movementTransceiver.connect(serial);
+  
+  if (interactionTransceiver == null)
+    interactionTransceiver = new SUIfMTransceiver(serial);
+  else
+    interactionTransceiver.connect(serial);
 }
 
 /**
@@ -332,8 +356,11 @@ protected void executeMovement(Checkerboard board) {
     delay(10);
     movementTransceiver.transmitDifference(executedMovements.get(executedMovements.size() - 1 - boardIndexOffset), board, new ArrayList<ChessFigure>());
  	  interactionTransceiver.resetConfirmation();
+    if (boardIndexOffset > 0)
+      executedMovements.subList(executedMovements.size() - boardIndexOffset, executedMovements.size()).clear();
 	  executedMovements.add(board);
-	  round++;
+    round++;
+    boardIndexOffset = 0;
   } catch (FigureNotFoundException ex) {
 	  interactionTransceiver.setControlStatus(ControlStatus.MISSING_FIGURE);
   }
@@ -640,7 +667,7 @@ public void drawSerialSelector(int x, int y) {
   pushStyle();
   textSize(16);
   if (serial != null)
-    text(Serial.list()[serialIndex], x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
+    text(seriallist[serialIndex], x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
   else
     text("No Connection", x, y + pxFieldSize / 4, pxFieldSize, 0.35 * pxFieldSize);
   popStyle();
@@ -671,7 +698,7 @@ public void drawCaptureSelector(int x, int y) {
   pushStyle();
   textSize(10);  
   if (capture != null) {
-    String[] args = Capture.list()[captureIndex].split(",");
+    String[] args = capturelist[captureIndex].split(",");
     String display = "";
     for (int n = 0; n < args.length; n++)
       display += args[n].substring(args[n].indexOf('=') + 1) + (n == args.length ? "" : ", ");
@@ -845,7 +872,7 @@ void mouseClicked() {
     
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
-        view = (byte) ((view + 1) % 2);
+        view = (byte) ((view + 1) % 3);
       }
   }
   
@@ -890,10 +917,10 @@ void mouseClicked() {
     int y = mouseY - fromGridY(gridY);
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
-        if (Serial.list().length > 0) {
-          serialIndex = (serialIndex + 1) % Serial.list().length;
+        if (seriallist.length > 0) {
+          serialIndex = (serialIndex + 1) % seriallist.length;
           try {
-            setSerial(new Serial(this, Serial.list()[serialIndex], 9600));
+            setSerial(new Serial(this, seriallist[serialIndex], 9600));
           } catch (Exception ex) {
             setSerial(null);
           }
@@ -906,9 +933,9 @@ void mouseClicked() {
     int y = mouseY - fromGridY(gridY);
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > 3 * pxFieldSize / 5 && y < 0.85 * pxFieldSize) {
-        if (Capture.list().length > 0) {
-          captureIndex = (captureIndex + 1) % Capture.list().length;
-          setCapture(new Capture(this, Capture.list()[captureIndex]));
+        if (capturelist.length > 0) {
+          captureIndex = (captureIndex + 1) % capturelist.length;
+          setCapture(new Capture(this, capturelist[captureIndex]));
         }
       }
   }
@@ -929,6 +956,7 @@ void mouseClicked() {
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
         boardIndexOffset = constrain(boardIndexOffset + 1, 0, executedMovements.size() - 1);
+        round = executedMovements.size() - 1 - boardIndexOffset;
         paused = true;
         confirmedSelection = false;
       }
@@ -941,6 +969,7 @@ void mouseClicked() {
     if (x > pxFieldSize / 4 && x < 3 * pxFieldSize / 4)
       if (y > pxFieldSize / 4 && y < 3 * pxFieldSize / 4) {
         boardIndexOffset = constrain(boardIndexOffset - 1, 0, executedMovements.size() - 1);
+        round = executedMovements.size() - 1 - boardIndexOffset;
         confirmedSelection = false;
       }
   }

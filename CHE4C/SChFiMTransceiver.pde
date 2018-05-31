@@ -55,10 +55,11 @@ class SChFiMTransceiver extends SerialTransceiver {
   public boolean transmitDifference(Checkerboard initial, Checkerboard goal, ArrayList<ChessFigure> avalible) throws FigureNotFoundException {
     if (initial == null || goal == null || avalible == null)
       return true;
-    for (String command : getDifference(initial, goal, avalible))
+    for (String command : getDifference(initial, goal, avalible)) {
       if (!this.transmit(command + "\n"))
         return false;
       delay(5);
+    }
     return true;
   }
   

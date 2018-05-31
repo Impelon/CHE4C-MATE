@@ -547,7 +547,7 @@ class Checkerboard implements Comparable<Checkerboard> {
           }
         }
       } else {
-    	this.apply(tempBoard, figure.getPositionX(), figure.getPositionY(), x, y, false, removes, null);
+    	  this.apply(tempBoard, figure.getPositionX(), figure.getPositionY(), x, y, false, removes, null);
         boards.add(tempBoard);
       }
     }
